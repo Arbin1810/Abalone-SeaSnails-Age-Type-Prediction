@@ -64,7 +64,7 @@ for col in numeric_cols:
 
 #Visualization 
 import streamlit as st
-
+from test import train_and_compare_models
 # Set page config for wider displaying
 st.set_page_config(page_title="Abalone(SeaSnails) Age Prediction by Arbind", layout="wide")
 
@@ -429,113 +429,41 @@ with col2:
 #4. Train the different ML model for you problem and show barchart for their accuracy metrics [KNN, SVR, Logistic Regrssion] (best model after hyperparameter tuning) (In Streamlit Dashboard)
 # for regression we gonna analyze among : KNN (REGRESSION), SVR, linear regression
 
+# ML Model Training Section
 st.header("4. Machine Learning Models Comparison")
 
-# FIRST: Remove the Ring_category column before training
+# Remove Ring_category column before training
 if 'Ring_category' in abalone_df.columns:
     abalone_df = abalone_df.drop(columns=['Ring_category'])
 
-from sklearn.model_selection import train_test_split, GridSearchCV, RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler
+# Train models and get metrics
+with st.spinner("Training models and tuning hyperparameters..."):
+    metrics_data, scaler, feature_names = train_and_compare_models(abalone_df)
 
-#our types column contains categorical features which should be converted into numerical so i used one-hot encode which creates binary code for each categorical columns
+# Display best parameters
+st.subheader("Best Hyperparameters Found:")
+for model_name, data in metrics_data.items():
+    st.write(f"**{model_name}:** {data['best_params']}")
 
-y = abalone_df['Rings']
-X = abalone_df.drop(columns=['Rings'])
+# Create comparison DataFrame
+comparison_df = pd.DataFrame({
+    'Model': list(metrics_data.keys()),
+    'MSE': [metrics_data[m]['mse'] for m in metrics_data.keys()],
+    'R² Score': [metrics_data[m]['r2'] for m in metrics_data.keys()],
+    'MAE': [metrics_data[m]['mae'] for m in metrics_data.keys()],
+    'RMSE': [metrics_data[m]['rmse'] for m in metrics_data.keys()]
+})
 
-# One-Hot Encode the categorical column
-X = pd.get_dummies(X, columns=['Type'], drop_first=True)
-
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-X_train, X_test,y_train,y_test = train_test_split(X_scaled,y,test_size=0.2, random_state=42)
-
-#Linear Regression 
-from sklearn.linear_model import LinearRegression
-from sklearn.neighbors import KNeighborsRegressor
-from sklearn.svm import SVR
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-
-# HYPERPARAMETER TUNING FOR EACH MODEL
-
-# 1. Linear Regression (no hyperparameters to tune)
-linear_model = LinearRegression()
-linear_model.fit(X_train, y_train)
-
-# 2. KNN Regression with GridSearchCV
-st.subheader("Hyperparameter Tuning for KNN")
-knn_params = {
-    'n_neighbors': [3, 5, 7, 9, 11, 13, 15],
-    'weights': ['uniform', 'distance'],
-    'metric': ['euclidean', 'manhattan', 'minkowski']
-}
-
-knn_model = KNeighborsRegressor()
-knn_grid = GridSearchCV(knn_model, knn_params, cv=5, scoring='r2', n_jobs=-1)
-knn_grid.fit(X_train, y_train)
-best_knn = knn_grid.best_estimator_
-
-st.write(f"**Best KNN Parameters:** {knn_grid.best_params_}")
-st.write(f"**Best KNN R² Score (CV):** {knn_grid.best_score_:.3f}")
-
-# 3. SVR with RandomizedSearchCV (faster than GridSearchCV for SVR)
-st.subheader("Hyperparameter Tuning for SVR")
-svr_params = {
-    'C': [0.1, 1, 10],
-    'epsilon': [0.01, 0.1, 0.5, 1.0],
-    'kernel': ['rbf', 'linear', 'poly'],
-    'gamma': ['scale', 'auto', 0.01, 0.1, 1]
-}
-
-svr_model = SVR()
-svr_random = RandomizedSearchCV(svr_model, svr_params, n_iter=20, cv=5, 
-                                scoring='r2', random_state=42, n_jobs=-1)
-svr_random.fit(X_train, y_train)
-best_svr = svr_random.best_estimator_
-
-st.write(f"**Best SVR Parameters:** {svr_random.best_params_}")
-st.write(f"**Best SVR R² Score (CV):** {svr_random.best_score_:.3f}")
-
-# Make predictions with best models
-y_pred_linear = linear_model.predict(X_test)
-y_pred_knn = best_knn.predict(X_test)
-y_pred_svr = best_svr.predict(X_test)
-
-#evaluation
-mse_linear = mean_squared_error(y_test, y_pred_linear)
-mse_knn = mean_squared_error(y_test, y_pred_knn)
-mse_svr = mean_squared_error(y_test, y_pred_svr)
-
-r2_linear = r2_score(y_test, y_pred_linear)
-r2_knn = r2_score(y_test, y_pred_knn)
-r2_svr = r2_score(y_test, y_pred_svr)
-
-mae_linear = mean_absolute_error(y_test, y_pred_linear)
-mae_knn = mean_absolute_error(y_test, y_pred_knn)
-mae_svr = mean_absolute_error(y_test, y_pred_svr)
-
-rmse_linear = np.sqrt(mse_linear)
-rmse_knn = np.sqrt(mse_knn)
-rmse_svr = np.sqrt(mse_svr)
-
-# Display metrics
 st.subheader("Model Performance Metrics (After Hyperparameter Tuning)")
-metrics_data = {
-    'Model': ['Linear Regression', 'KNN Regression (Tuned)', 'SVR (Tuned)'],
-    'MSE': [mse_linear, mse_knn, mse_svr],
-    'R² Score (Higher is better)': [r2_linear, r2_knn, r2_svr],
-    'MAE': [mae_linear, mae_knn, mae_svr],
-    'RMSE (Lower is better)': [rmse_linear, rmse_knn, rmse_svr]
-}
+st.dataframe(comparison_df)
 
-metrics_df = pd.DataFrame(metrics_data)
-st.dataframe(metrics_df)
+# Find best model
+best_model_name = max(metrics_data.keys(), key=lambda x: metrics_data[x]['r2'])
+best_model = metrics_data[best_model_name]['model']
 
-#from the above given parameters i found SVR model to be the best 
-st.subheader("From the above parameters after tuning i found SVR model to be the best for tthis given datsets.")
-
-
+st.subheader(f"Best Model: {best_model_name}")
+st.write(f"**R² Score:** {metrics_data[best_model_name]['r2']:.3f}")
+st.write(f"**RMSE:** {metrics_data[best_model_name]['rmse']:.3f}")
 
 # PREDICTION INTERFACE FOR ABALONE AGE
 st.header("Predict Abalone Age")
@@ -543,11 +471,8 @@ st.header("Predict Abalone Age")
 age_category_mapping = {
     'Young (≤5 rings)': "Young Abalone (Age: ≤5 rings)",
     'Middle (6-10 rings)': "Middle-aged Abalone (Age: 6-10 rings)",
-    'Old (>10 rings)': "Old Abalone** (Age: >10 rings)"
+    'Old (>10 rings)': "Old Abalone (Age: >10 rings)"
 }
-
-# Get feature names after one-hot encoding
-feature_names = list(X.columns)
 
 st.subheader("Enter Abalone Measurements:")
 
@@ -595,8 +520,8 @@ if st.button("Predict Abalone Age"):
     # Scale the input data using the same scaler
     user_data_scaled = scaler.transform(user_data)
     
-    # Make prediction using SVR 
-    predicted_rings = best_svr.predict(user_data_scaled)[0]
+    # Make prediction using best model
+    predicted_rings = best_model.predict(user_data_scaled)[0]
     
     # Calculate actual age (age = rings + 1.5 years)
     actual_age = predicted_rings + 1.5
@@ -629,4 +554,3 @@ if st.button("Predict Abalone Age"):
             st.warning(age_category_mapping[age_category])
         else:
             st.error(age_category_mapping[age_category])
-    
