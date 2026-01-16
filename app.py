@@ -64,7 +64,7 @@ for col in numeric_cols:
 
 #Visualization 
 import streamlit as st
-from test import train_and_compare_models
+from test import train_and_compare_models, train_single_model
 # Set page config for wider displaying
 st.set_page_config(page_title="Abalone(SeaSnails) Age Prediction by Arbind", layout="wide")
 
@@ -423,134 +423,281 @@ with col2:
     plt.tight_layout()
     st.pyplot(fig2)
 
-
-
-
-#4. Train the different ML model for you problem and show barchart for their accuracy metrics [KNN, SVR, Logistic Regrssion] (best model after hyperparameter tuning) (In Streamlit Dashboard)
-# for regression we gonna analyze among : KNN (REGRESSION), SVR, linear regression
-
 # ML Model Training Section
 st.header("4. Machine Learning Models Comparison")
 
-# Remove Ring_category column before training
+# Remove Ring_category column if it exists
 if 'Ring_category' in abalone_df.columns:
     abalone_df = abalone_df.drop(columns=['Ring_category'])
 
-# Train models and get metrics
-with st.spinner("Training models and tuning hyperparameters..."):
-    metrics_data, scaler, feature_names = train_and_compare_models(abalone_df)
+# Initialize session state variables
+if 'best_model' not in st.session_state:
+    st.session_state.best_model = None
+if 'scaler' not in st.session_state:
+    st.session_state.scaler = None
+if 'feature_names' not in st.session_state:
+    st.session_state.feature_names = None
+if 'metrics_data' not in st.session_state:
+    st.session_state.metrics_data = None
+if 'model_trained' not in st.session_state:
+    st.session_state.model_trained = False
+if 'default_model_trained' not in st.session_state:
+    st.session_state.default_model_trained = False
+if 'selected_model' not in st.session_state:
+    st.session_state.selected_model = 'SVR (Default)'
 
-# Display best parameters
-st.subheader("Best Hyperparameters Found:")
-for model_name, data in metrics_data.items():
-    st.write(f"**{model_name}:** {data['best_params']}")
+# Train default SVR model on app startup (only once)
+if not st.session_state.default_model_trained:
+    with st.spinner("Training default SVR model..."):
+        # Train SVR as default model
+        metrics_data, scaler, feature_names, model = train_single_model(abalone_df, 'SVR')
+        
+        if metrics_data:
+            st.session_state.metrics_data = metrics_data
+            st.session_state.scaler = scaler
+            st.session_state.feature_names = feature_names
+            st.session_state.best_model = model
+            st.session_state.model_trained = True
+            st.session_state.default_model_trained = True
+            st.session_state.selected_model = 'SVR (Default)'
 
-# Create comparison DataFrame
-comparison_df = pd.DataFrame({
-    'Model': list(metrics_data.keys()),
-    'MSE': [metrics_data[m]['mse'] for m in metrics_data.keys()],
-    'R² Score': [metrics_data[m]['r2'] for m in metrics_data.keys()],
-    'MAE': [metrics_data[m]['mae'] for m in metrics_data.keys()],
-    'RMSE': [metrics_data[m]['rmse'] for m in metrics_data.keys()]
-})
+# Create two tabs for training and prediction
+tab1, tab2 = st.tabs(["Model Training", "Real-time Prediction"])
 
-st.subheader("Model Performance Metrics (After Hyperparameter Tuning)")
-st.dataframe(comparison_df)
-
-# Find best model
-best_model_name = max(metrics_data.keys(), key=lambda x: metrics_data[x]['r2'])
-best_model = metrics_data[best_model_name]['model']
-
-st.subheader(f"Best Model: {best_model_name}")
-st.write(f"**R² Score:** {metrics_data[best_model_name]['r2']:.3f}")
-st.write(f"**RMSE:** {metrics_data[best_model_name]['rmse']:.3f}")
-
-# PREDICTION INTERFACE FOR ABALONE AGE
-st.header("Predict Abalone Age")
-
-age_category_mapping = {
-    'Young (≤5 rings)': "Young Abalone (Age: ≤5 rings)",
-    'Middle (6-10 rings)': "Middle-aged Abalone (Age: 6-10 rings)",
-    'Old (>10 rings)': "Old Abalone (Age: >10 rings)"
-}
-
-st.subheader("Enter Abalone Measurements:")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    longest_shell = st.number_input("Longest Shell (mm)", min_value=0.0, max_value=1.0, 
-                                    value=0.5, step=0.01, help="Length of the longest shell measurement")
-    diameter = st.number_input("Diameter (mm)", min_value=0.0, max_value=1.0, 
-                               value=0.4, step=0.01, help="Diameter measurement")
-    height = st.number_input("Height (mm)", min_value=0.0, max_value=1.0, 
-                             value=0.15, step=0.01, help="Height measurement")
-    whole_weight = st.number_input("Whole Weight (grams)", min_value=0.0, max_value=3.0, 
-                                   value=0.8, step=0.01, help="Total weight of the abalone")
-
-with col2:
-    shucked_weight = st.number_input("Shucked Weight (grams)", min_value=0.0, max_value=2.0, 
-                                     value=0.3, step=0.01, help="Weight of meat after shucking")
-    viscera_weight = st.number_input("Viscera Weight (grams)", min_value=0.0, max_value=1.0, 
-                                     value=0.15, step=0.01, help="Weight of gut organs")
-    shell_weight = st.number_input("Shell Weight (grams)", min_value=0.0, max_value=1.5, 
-                                   value=0.2, step=0.01, help="Weight of the shell")
+with tab1:
+    st.subheader("Train Machine Learning Models")
     
-    # Type selection
-    type = st.selectbox("Types", ["Male (M)", "Female (F)", "Infant (I)"], 
-                       help="Select the type of the abalone")
-
-# Create one-hot encoding for sex
-if type == "Male (M)":
-    type_f = 0
-    type_i = 0
-elif type == "Female (F)":
-    type_f = 1
-    type_i = 0
-else:  # Infant (I)
-    type_f = 0
-    type_i = 1
-
-# Create user input array in the same order as training
-user_data = [[longest_shell, diameter, height, whole_weight, 
-              shucked_weight, viscera_weight, shell_weight, type_f, type_i]]
-
-# Prediction button
-if st.button("Predict Abalone Age"):
-    # Scale the input data using the same scaler
-    user_data_scaled = scaler.transform(user_data)
+    # Show default model status
+    if st.session_state.default_model_trained:
+        st.success("✓ Default SVR model trained automatically on startup")
     
-    # Make prediction using best model
-    predicted_rings = best_model.predict(user_data_scaled)[0]
+    # Train all models button
+    if st.button("Train All Models", key="train_all_models"):
+        with st.spinner("Training all models and tuning hyperparameters..."):
+            metrics_data, scaler, feature_names = train_and_compare_models(abalone_df)
+            
+            # Store in session state
+            st.session_state.metrics_data = metrics_data
+            st.session_state.scaler = scaler
+            st.session_state.feature_names = feature_names
+            st.session_state.model_trained = True
+            
+            # Find and store the best model
+            best_model_name = max(metrics_data.keys(), key=lambda x: metrics_data[x]['r2'])
+            st.session_state.best_model = metrics_data[best_model_name]['model']
+            st.session_state.selected_model = best_model_name
+            
+            st.success(f"All models trained successfully! Best model: {best_model_name}")
     
-    # Calculate actual age (age = rings + 1.5 years)
-    actual_age = predicted_rings + 1.5
+    # Train individual model buttons
+    st.subheader("Train Individual Models")
+    col1, col2, col3 = st.columns(3)
     
-    # Categorize age
-    if predicted_rings <= 5:
-        age_category = 'Young (≤5 rings)'
-    elif 6 <= predicted_rings <= 10:
-        age_category = 'Middle (6-10 rings)'
+    with col1:
+        if st.button("Train Linear Regression", key="train_lr"):
+            with st.spinner("Training Linear Regression..."):
+                metrics_data, scaler, feature_names, model = train_single_model(abalone_df, 'Linear Regression')
+                if metrics_data:
+                    if st.session_state.metrics_data:
+                        st.session_state.metrics_data['Linear Regression'] = metrics_data['Linear Regression']
+                    else:
+                        st.session_state.metrics_data = metrics_data
+                    st.session_state.scaler = scaler
+                    st.session_state.feature_names = feature_names
+                    st.session_state.model_trained = True
+                    st.session_state.best_model = model
+                    st.session_state.selected_model = 'Linear Regression'
+                    st.success("Linear Regression trained successfully!")
+    
+    with col2:
+        if st.button("Train KNN Regression", key="train_knn"):
+            with st.spinner("Training KNN Regression with hyperparameter tuning..."):
+                metrics_data, scaler, feature_names, model = train_single_model(abalone_df, 'KNN Regression')
+                if metrics_data:
+                    if st.session_state.metrics_data:
+                        st.session_state.metrics_data['KNN Regression'] = metrics_data['KNN Regression']
+                    else:
+                        st.session_state.metrics_data = metrics_data
+                    st.session_state.scaler = scaler
+                    st.session_state.feature_names = feature_names
+                    st.session_state.model_trained = True
+                    st.session_state.best_model = model
+                    st.session_state.selected_model = 'KNN Regression'
+                    st.success("KNN Regression trained successfully!")
+    
+    with col3:
+        if st.button("Train SVR", key="train_svr"):
+            with st.spinner("Training SVR with hyperparameter tuning..."):
+                metrics_data, scaler, feature_names, model = train_single_model(abalone_df, 'SVR')
+                if metrics_data:
+                    if st.session_state.metrics_data:
+                        st.session_state.metrics_data['SVR'] = metrics_data['SVR']
+                    else:
+                        st.session_state.metrics_data = metrics_data
+                    st.session_state.scaler = scaler
+                    st.session_state.feature_names = feature_names
+                    st.session_state.model_trained = True
+                    st.session_state.best_model = model
+                    st.session_state.selected_model = 'SVR'
+                    st.success("SVR trained successfully!")
+    
+    # Display training results if models are trained
+    if st.session_state.model_trained and st.session_state.metrics_data:
+        st.subheader("Model Performance Metrics")
+        
+        # Create comparison DataFrame
+        comparison_df = pd.DataFrame({
+            'Model': list(st.session_state.metrics_data.keys()),
+            'MSE': [st.session_state.metrics_data[m]['mse'] for m in st.session_state.metrics_data.keys()],
+            'R² Score': [st.session_state.metrics_data[m]['r2'] for m in st.session_state.metrics_data.keys()],
+            'MAE': [st.session_state.metrics_data[m]['mae'] for m in st.session_state.metrics_data.keys()],
+            'RMSE': [st.session_state.metrics_data[m]['rmse'] for m in st.session_state.metrics_data.keys()]
+        })
+        
+        st.dataframe(comparison_df)
+        
+        # Display best parameters
+        st.subheader("Best Hyperparameters Found:")
+        for model_name, data in st.session_state.metrics_data.items():
+            st.write(f"**{model_name}:** {data['best_params']}")
+        
+        # Find and display best model
+        if len(st.session_state.metrics_data) > 0:
+            best_model_name = max(st.session_state.metrics_data.keys(), 
+                                key=lambda x: st.session_state.metrics_data[x]['r2'])
+            st.subheader(f"Best Model: {best_model_name}")
+            st.write(f"**R² Score:** {st.session_state.metrics_data[best_model_name]['r2']:.3f}")
+            st.write(f"**RMSE:** {st.session_state.metrics_data[best_model_name]['rmse']:.3f}")
     else:
-        age_category = 'Old (>10 rings)'
-    
-    # Display result
-    st.markdown("---")
-    st.subheader("Prediction Result")
-    
-    # result display
-    result_col1, result_col2, result_col3 = st.columns(3)
-    
-    with result_col1:
-        st.metric("Predicted Rings", f"{predicted_rings:.1f}")
-    
-    with result_col2:
-        st.metric("Estimated Age", f"{actual_age:.1f} years")
-    
-    with result_col3:
-        if age_category == 'Young (≤5 rings)':
-            st.success(age_category_mapping[age_category])
-        elif age_category == 'Middle (6-10 rings)':
-            st.warning(age_category_mapping[age_category])
+        if st.session_state.default_model_trained:
+            st.info("Default SVR model is trained. You can train other models using the buttons above.")
         else:
-            st.error(age_category_mapping[age_category])
+            st.info("No models trained yet. Click the buttons above to train models.")
+
+with tab2:
+    st.subheader("Real-time Abalone Age Prediction")
+    
+    if not st.session_state.model_trained or st.session_state.best_model is None:
+        st.warning("No model trained yet. Please train at least one model in the 'Model Training' tab first.")
+    else:
+        age_category_mapping = {
+            'Young (≤5 rings)': "Young Abalone (Age: ≤5 rings)",
+            'Middle (6-10 rings)': "Middle-aged Abalone (Age: 6-10 rings)",
+            'Old (>10 rings)': "Old Abalone (Age: >10 rings)"
+        }
+        
+        # Model selection for prediction
+        st.subheader("Select Model for Prediction")
+        
+        # Get available trained models
+        available_models = []
+        if st.session_state.metrics_data:
+            available_models = list(st.session_state.metrics_data.keys())
+        
+        if available_models:
+            # Add default label to SVR if it's the default
+            model_options = []
+            for model in available_models:
+                if model == 'SVR' and st.session_state.default_model_trained and st.session_state.selected_model == 'SVR (Default)':
+                    model_options.append('SVR (Default)')
+                else:
+                    model_options.append(model)
+            
+            selected_model_name = st.selectbox(
+                "Choose model for prediction:",
+                model_options,
+                index=model_options.index(st.session_state.selected_model) if st.session_state.selected_model in model_options else 0
+            )
+            
+            # Update selected model
+            if selected_model_name != st.session_state.selected_model:
+                # Extract actual model name without "(Default)" suffix
+                actual_model_name = selected_model_name.replace(' (Default)', '')
+                if actual_model_name in st.session_state.metrics_data:
+                    st.session_state.best_model = st.session_state.metrics_data[actual_model_name]['model']
+                    st.session_state.selected_model = selected_model_name
+                    st.rerun()
+        
+        st.subheader("Enter Abalone Measurements:")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            longest_shell = st.number_input("Longest Shell (mm)", min_value=0.0, max_value=1.0, 
+                                            value=0.5, step=0.01, help="Length of the longest shell measurement", key="rt_longest")
+            diameter = st.number_input("Diameter (mm)", min_value=0.0, max_value=1.0, 
+                                       value=0.4, step=0.01, help="Diameter measurement", key="rt_diameter")
+            height = st.number_input("Height (mm)", min_value=0.0, max_value=1.0, 
+                                     value=0.15, step=0.01, help="Height measurement", key="rt_height")
+            whole_weight = st.number_input("Whole Weight (grams)", min_value=0.0, max_value=3.0, 
+                                           value=0.8, step=0.01, help="Total weight of the abalone", key="rt_whole")
+        
+        with col2:
+            shucked_weight = st.number_input("Shucked Weight (grams)", min_value=0.0, max_value=2.0, 
+                                             value=0.3, step=0.01, help="Weight of meat after shucking", key="rt_shucked")
+            viscera_weight = st.number_input("Viscera Weight (grams)", min_value=0.0, max_value=1.0, 
+                                             value=0.15, step=0.01, help="Weight of gut organs", key="rt_viscera")
+            shell_weight = st.number_input("Shell Weight (grams)", min_value=0.0, max_value=1.5, 
+                                           value=0.2, step=0.01, help="Weight of the shell", key="rt_shell")
+            
+            # Type selection
+            type = st.selectbox("Types", ["Male (M)", "Female (F)", "Infant (I)"], 
+                               help="Select the type of the abalone", key="rt_type")
+        
+        # Create one-hot encoding for sex
+        if type == "Male (M)":
+            type_f = 0
+            type_i = 0
+        elif type == "Female (F)":
+            type_f = 1
+            type_i = 0
+        else:  # Infant (I)
+            type_f = 0
+            type_i = 1
+        
+        # Create user input array in the same order as training
+        user_data = [[longest_shell, diameter, height, whole_weight, 
+                      shucked_weight, viscera_weight, shell_weight, type_f, type_i]]
+        
+        # Prediction button
+        if st.button("Predict Abalone Age", key="rt_predict"):
+            # Scale the input data using the same scaler
+            user_data_scaled = st.session_state.scaler.transform(user_data)
+            
+            # Make prediction using selected model
+            predicted_rings = st.session_state.best_model.predict(user_data_scaled)[0]
+            
+            # Calculate actual age (age = rings + 1.5 years)
+            actual_age = predicted_rings + 1.5
+            
+            # Categorize age
+            if predicted_rings <= 5:
+                age_category = 'Young (≤5 rings)'
+            elif 6 <= predicted_rings <= 10:
+                age_category = 'Middle (6-10 rings)'
+            else:
+                age_category = 'Old (>10 rings)'
+            
+            # Display result
+            st.markdown("---")
+            st.subheader("Prediction Result")
+            
+            # Display which model is being used
+            st.info(f"Using: {st.session_state.selected_model}")
+            
+            # result display
+            result_col1, result_col2, result_col3 = st.columns(3)
+            
+            with result_col1:
+                st.metric("Predicted Rings", f"{predicted_rings:.1f}")
+            
+            with result_col2:
+                st.metric("Estimated Age", f"{actual_age:.1f} years")
+            
+            with result_col3:
+                if age_category == 'Young (≤5 rings)':
+                    st.success(age_category_mapping[age_category])
+                elif age_category == 'Middle (6-10 rings)':
+                    st.warning(age_category_mapping[age_category])
+                else:
+                    st.error(age_category_mapping[age_category])
